@@ -1,4 +1,4 @@
-use cosmwasm_std::{HumanAddr};
+use cosmwasm_std::{HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -10,8 +10,13 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
-    RegisterMerkleRoot {
-        merkle_root: String,
+    MerkleRoot {
+        node: String,
+    },
+    Claim {
+        stage_index: u8,
+        amount: Uint128,
+        proof: Vec<String>,
     },
 }
 
@@ -19,6 +24,7 @@ pub enum HandleMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
-    MerkleRoot { stage: u8 },
-    LatestStage {},
+    MerkleRoot { stage_index: u8 },
+    StageIndex {},
+    IsClaimed { stage_index: u8, address: HumanAddr },
 }
