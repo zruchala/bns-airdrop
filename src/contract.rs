@@ -6,7 +6,6 @@ use crate::state::{Config, read_config, store_config, store_stage_index, store_m
 use hex;
 use sha3::{Keccak256, Digest};
 use std::convert::TryInto;
-use std::alloc::handle_alloc_error;
 
 const LEAF: u8 = 0x00;
 const INTERIOR: u8 = 0x01;
@@ -103,8 +102,6 @@ pub fn claim<S: Storage, A: Api, Q: Querier>(
     }
 
     // check whether proof is correct to proceed
-
-
     let hash: [u8; 32] = Keccak256::digest(&env.message.sender.to_string().as_bytes())
         .as_slice()
         .try_into()
@@ -116,15 +113,23 @@ pub fn claim<S: Storage, A: Api, Q: Querier>(
     right.copy_from_slice(&hash);
 
     let mut hash: [u8; 32] = Keccak256::digest(&buff).as_slice().try_into().expect("Converting error");
-
     for node_hash in proof {
-        let proof_hash: [u8; 32] = node_hash.as_bytes().try_into().expect("");
-        hash = Keccak256::digest(&sort_nodes(hash, proof_hash).concat())
-            .as_slice().try_into().expect("aaa");
+        let proof_hash: [u8; 32] = node_hash.as_bytes().try_into().expect("Error");
+        let mut parts: [u8; 3] = [0; 3];
+        let (l,r) = parts.split_at_mut(1);
+        l.copy_from_slice(&[INTERIOR]);
+        r.copy_from_slice(&sort_nodes(hash, proof_hash).concat());
+
+        hash = Keccak256::digest(&parts)
+            .as_slice().try_into().expect("To hash node conversion failed");
     }
 
     let mut root_buf: [u8; 32] = [0; 32];
-    hex::decode_to_slice(read_merkle_root(&deps.storage, stage_index)?, &mut root_buf);
+    let root = read_merkle_root(&deps.storage, stage_index)?;
+    match hex::decode_to_slice(root, &mut root_buf) {
+        Ok(()) => {},
+        _ => return Err(StdError::generic_err("Invalid hex encoded proof")),
+    };
 
     if root_buf != hash {
         return Err(StdError::generic_err("Proof is invalid"));
