@@ -11,7 +11,8 @@ static CLAIM_INDEX: &[u8] = b"claim_index";
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
-    pub owner: CanonicalAddr
+    pub owner: CanonicalAddr, // contract owner
+    pub token: CanonicalAddr  // cw20 token contract address
 }
 
 pub fn store_config<S: Storage>(storage: &mut S, config: &Config) -> StdResult<()> {

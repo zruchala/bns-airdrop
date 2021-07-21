@@ -1,11 +1,11 @@
-use cosmwasm_std::{Api, Binary, Env, Extern, HandleResponse, InitResponse, Querier, StdError, StdResult, Storage, log, to_binary, Uint128};
-
+use cosmwasm_std::{Api, Binary, Env, Extern, HandleResponse, InitResponse, Querier, StdError, StdResult, Storage, log, to_binary, CosmosMsg, WasmMsg, Uint128, HumanAddr};
 use crate::msg::{InitMsg, HandleMsg, QueryMsg};
 use crate::state::{Config, read_config, store_config, store_stage_index, store_merkle_root, read_stage_index, read_merkle_root, read_claimed, store_claimed};
 
 use hex;
 use sha3::{Keccak256, Digest};
 use std::convert::TryInto;
+use cw20::{Cw20HandleMsg};
 
 const LEAF: u8 = 0x00;
 const INTERIOR: u8 = 0x01;
@@ -21,6 +21,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         &mut deps.storage,
         &Config {
             owner: deps.api.canonical_address(&msg.owner)?,
+            token: deps.api.canonical_address(&msg.token)?,
         },
     )?;
     store_stage_index(&mut deps.storage, 0)?;
@@ -91,8 +92,8 @@ pub fn claim<S: Storage, A: Api, Q: Querier>(
     amount: Uint128,
     proof: Vec<String>
 ) -> StdResult<HandleResponse> {
-    let claiming_address = &deps.api.canonical_address(&env.message.sender)?;
 
+    let claiming_address = &deps.api.canonical_address(&env.message.sender)?;
     // check whether the airdrop is not claimed already
     if read_claimed(&deps.storage, claiming_address, stage_index)? {
         return Err(StdError::GenericErr {
@@ -101,48 +102,58 @@ pub fn claim<S: Storage, A: Api, Q: Querier>(
         });
     }
 
-    // check whether proof is correct to proceed
-    let hash: [u8; 32] = Keccak256::digest(&env.message.sender.to_string().as_bytes())
-        .as_slice()
-        .try_into()
-        .expect("Inconvertible sender address");
-
-    let mut buff: [u8; 33] = [0; 33];
-    let (left, right) = buff.split_at_mut(hash.len());
-    left.copy_from_slice(&[LEAF]);
-    right.copy_from_slice(&hash);
-
-    let mut hash: [u8; 32] = Keccak256::digest(&buff).as_slice().try_into().expect("Converting error");
-    for node_hash in proof {
-        let proof_hash: [u8; 32] = node_hash.as_bytes().try_into().expect("Error");
-        let mut parts: [u8; 3] = [0; 3];
-        let (l,r) = parts.split_at_mut(1);
-        l.copy_from_slice(&[INTERIOR]);
-        r.copy_from_slice(&sort_nodes(hash, proof_hash).concat());
-
-        hash = Keccak256::digest(&parts)
-            .as_slice().try_into().expect("To hash node conversion failed");
-    }
-
-    let mut root_buf: [u8; 32] = [0; 32];
+    let mut merkle_root: [u8; 32] = [0; 32];
     let root = read_merkle_root(&deps.storage, stage_index)?;
-    match hex::decode_to_slice(root, &mut root_buf) {
-        Ok(()) => {},
-        _ => return Err(StdError::generic_err("Invalid hex encoded proof")),
-    };
+    hex::decode_to_slice(root, &mut merkle_root).unwrap();
 
-    if root_buf != hash {
-        return Err(StdError::generic_err("Proof is invalid"));
+    if merkle_root != calculate_root(&env.message.sender, &amount, proof) {
+        return Err(StdError::generic_err("The proof presented is invalid"));
     }
 
+    let config: Config = read_config(&deps.storage)?;
+    // transfer token to msg sender
+    let cosmos_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: deps.api.human_address(&config.token)?,
+        send: vec![],
+        msg: to_binary(&Cw20HandleMsg::Transfer {
+            recipient: env.message.sender.clone(),
+            amount
+        })?
+    });
+
+    // Mark claiming_address to disallow taking the airdrop more than once ...
     store_claimed(&mut deps.storage, claiming_address, stage_index)?;
 
-    // TODO: needs to be finished.
     Ok(HandleResponse {
-        messages: vec![],
-        log: vec![],
+        messages: vec![cosmos_msg],
+        log: vec![
+            log("action", "claim"),
+            log("stage_index", stage_index),
+            log("address", claiming_address),
+            log("amount", amount)
+        ],
         data: None
     })
+}
+
+fn calculate_root(sender: &HumanAddr, amount: &Uint128, proof: Vec<String>) -> [u8; 32] {
+    let leaf = [sender.to_string(), amount.to_string()].join(":");
+    let leaf_hash: [u8; 32] = Keccak256::digest(leaf.as_bytes())
+        .as_slice().try_into().expect("Inconvertible sender address");
+
+    let mut prefixed_leaf_hash: [u8; 33] = [LEAF; 33];
+    prefixed_leaf_hash[1..].copy_from_slice(&leaf_hash);
+
+    let mut outcome: [u8; 32] = Keccak256::digest(&prefixed_leaf_hash)
+        .as_slice().try_into().expect("Conversion error");
+    for node_hash in proof {
+        let proof_hash: [u8; 32] = node_hash.as_bytes().try_into().expect("Conversion error");
+        let mut parts: [u8; 3] = [INTERIOR; 3];
+        parts[1..].copy_from_slice(&sort_nodes(outcome, proof_hash).concat());
+        outcome = Keccak256::digest(&parts)
+            .as_slice().try_into().expect("Conversion error");
+    }
+    outcome
 }
 
 fn sort_nodes(left: [u8; 32], right: [u8; 32]) -> [[u8;32]; 2] {

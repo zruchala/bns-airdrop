@@ -1,3 +1,6 @@
+# BNS Airdrop
+
+This is a sample contract that realizes the airdrop functionality. The smart contract is built on CosmWasm library and dedicated to terra ecosystem (tested on LocalTerra only).
 
 ## Build the contract
 
@@ -17,9 +20,10 @@ terracli tx wasm store artifacts/bns_airdrop.wasm --from test1 --chain-id=localt
 
 * code_id - id of the deployed contract;
 * owner - human address of the contract owner (admin);
+* token - human address of the token contract;
 
 ``
-terracli tx wasm instantiate <code_id> '{"owner": <owner_address>}' --from test1 --chain-id=localterra --fees=10000uluna --gas=auto --broadcast-mode=block
+terracli tx wasm instantiate <code_id> '{"owner": "<owner_address>", "token": "<token_address>"}' --from test1 --chain-id=localterra --fees=10000uluna --gas=auto --broadcast-mode=block
 ``
 
 
@@ -44,4 +48,10 @@ terracli query wasm contract-store <contract_address> '{"merkle_root": {"stage_i
 
 ``
 terracli query wasm contract-store <contract_address> '{"is_claimed": {"stage_index": 1, "address": "<claim_address>" }}'
+``
+
+### Claim airdrop
+
+``
+terracli tx wasm execute <contract_address> '{"claim": {"stage_index": 1, "amount": "1111", "proof": ["9446abab3c6c205e08648131ed635e9fd53cb58ecc495eeb98e20bb5ddde8e75", "ba6494fc293a91a73a7ee94d31beba417ed5ad43a648227613920c39237f77bc"]}}' --from test1 --chain-id=localterra --fees=1000000uluna --gas=auto --broadcast-mode=block
 ``
